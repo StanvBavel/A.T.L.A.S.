@@ -135,3 +135,98 @@ h1 {
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(0, 243, 255, 0.5); }
+
+/* HUD Circle Core */
+.atlas-core-container {
+    position: relative;
+    width: 300px;
+    height: 300px;
+    margin: 0 auto 30px auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.core-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+}
+
+.ring-1 {
+    width: 280px;
+    height: 280px;
+    border-top: 3px solid var(--primary-neon);
+    border-bottom: 3px solid var(--primary-neon);
+    animation: rotateRing 10s linear infinite;
+}
+
+.ring-2 {
+    width: 240px;
+    height: 240px;
+    border-left: 2px solid rgba(0, 243, 255, 0.7);
+    border-right: 2px solid rgba(0, 243, 255, 0.7);
+    border-top: 1px dashed rgba(0, 243, 255, 0.5);
+    animation: rotateRingReverse 8s linear infinite;
+}
+
+.ring-3 {
+    width: 200px;
+    height: 200px;
+    border: 4px dotted rgba(0, 243, 255, 0.4);
+    animation: rotateRing 15s linear infinite;
+}
+
+.core-text {
+    position: absolute;
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--primary-neon);
+    text-shadow: 0 0 10px var(--primary-neon);
+    letter-spacing: 4px;
+    z-index: 10;
+}
+
+/* Animations */
+@keyframes rotateRing {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes rotateRingReverse {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(-360deg); }
+}
+
+/* States */
+.status-speaking .ring-1,
+.status-speaking .ring-2,
+.status-speaking .ring-3 {
+    border-color: #f0f;
+    animation-duration: 2s; /* Spin faster */
+}
+
+.status-speaking .core-text {
+    color: #f0f;
+    text-shadow: 0 0 20px #f0f;
+    animation: pulseText 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes pulseText {
+    from { transform: scale(1); opacity: 0.8; }
+    to { transform: scale(1.1); opacity: 1; }
+}
+
+.status-thinking .ring-1,
+.status-thinking .ring-2,
+.status-thinking .ring-3 {
+    border-color: #ff0;
+    animation-duration: 4s;
+}
+
+.status-listening .ring-1,
+.status-listening .ring-2,
+.status-listening .ring-3 {
+    border-color: #0f0;
+}

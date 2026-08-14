@@ -8,6 +8,9 @@ using Microsoft.AspNetCore.SignalR;
 using System.Text.Json;
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using System;
+using System.Linq;
 
 namespace Atlas.Api
 {
@@ -20,6 +23,14 @@ namespace Atlas.Api
         {
             _aiProvider = aiProvider;
             _toolDispatcher = toolDispatcher;
+        }
+
+        public override async Task OnConnectedAsync()
+        {
+            await base.OnConnectedAsync();
+            // J.A.R.V.I.S.-style Greeting
+            var greeting = "Welcome Sir. Shall I initialize the system diagnostics?";
+            await Clients.Caller.SendAsync("ReceiveMessage", greeting);
         }
 
         public async Task SendText(string text)

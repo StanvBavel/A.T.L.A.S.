@@ -11,19 +11,19 @@ class AtlasVoice {
     initSTT() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
-            logMessage("Error: Web Speech API (STT) not supported in this browser.");
+            console.error("Web Speech API (STT) not supported in this browser.");
             return;
         }
 
         this.recognition = new SpeechRecognition();
-        this.recognition.lang = 'nl-NL'; // Default to Dutch, can be made configurable
+        this.recognition.lang = 'nl-NL';
         this.recognition.continuous = true;
         this.recognition.interimResults = false;
 
         this.recognition.onstart = () => {
             this.isListening = true;
-            logMessage("[VOICE]: Listening for Wake Word...");
-            updateUiState("LISTENING");
+            if (window.logMessage) window.logMessage("[VOICE]: Listening for Wake Word...");
+            if (window.updateUiState) window.updateUiState("LISTENING");
         };
 
         this.recognition.onresult = (event) => {
@@ -32,10 +32,10 @@ class AtlasVoice {
 
             if (transcript.includes("hey atlas") || transcript.includes("he atlas")) {
                 const command = transcript.replace(/hey atlas|he atlas/g, "").trim();
-                logMessage(`[VOICE IN]: ${transcript}`);
+                if (window.logMessage) window.logMessage(`[VOICE IN]: ${transcript}`);
 
                 if (command.length > 0) {
-                    sendToServer(command);
+                    if (window.sendToServer) window.sendToServer(command);
                 } else {
                     this.speak("Ja?");
                 }
@@ -43,19 +43,18 @@ class AtlasVoice {
         };
 
         this.recognition.onerror = (event) => {
-            logMessage(`[VOICE ERROR]: ${event.error}`);
+            if (window.logMessage) window.logMessage(`[VOICE ERROR]: ${event.error}`);
             if (event.error !== 'no-speech') {
-                updateUiState("STANDBY");
+                if (window.updateUiState) window.updateUiState("STANDBY");
                 this.isListening = false;
             }
         };
 
         this.recognition.onend = () => {
-            // Auto-restart if we want continuous listening, but for now we require explicit start
             if (this.isListening) {
                 this.recognition.start();
             } else {
-                updateUiState("STANDBY");
+                if (window.updateUiState) window.updateUiState("STANDBY");
             }
         };
     }
@@ -76,21 +75,23 @@ class AtlasVoice {
     speak(text) {
         if (!this.synth) return;
 
-        updateUiState("SPEAKING");
-
         // Cancel any ongoing speech
         this.synth.cancel();
 
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'nl-NL';
+        utterance.lang = 'en-US'; // Set to english for the intro, can be dynamic later
+
+        utterance.onstart = () => {
+            if (window.updateUiState) window.updateUiState("SPEAKING");
+        };
 
         utterance.onend = () => {
-            updateUiState("STANDBY");
+            if (window.updateUiState) window.updateUiState("STANDBY");
         };
 
         utterance.onerror = (e) => {
-            logMessage(`[VOICE TTS ERROR]: ${e.error}`);
-            updateUiState("STANDBY");
+            if (window.logMessage) window.logMessage(`[VOICE TTS ERROR]: ${e.error}`);
+            if (window.updateUiState) window.updateUiState("STANDBY");
         };
 
         this.synth.speak(utterance);
@@ -98,3 +99,4 @@ class AtlasVoice {
 }
 
 const atlasVoice = new AtlasVoice();
+window.atlasVoice = atlasVoice; // Ensure it is globally accessible
