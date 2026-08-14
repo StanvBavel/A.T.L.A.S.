@@ -45,15 +45,16 @@ function startSignalR() {
         }
     });
 
-    connection.on("ActivateHologramMode", () => {
+    // --- Hologram Async State Management ---
+    connection.on("HologramGenerationStarted", (objectName) => {
         if (window.hologramController) {
-            window.hologramController.activate();
+            window.hologramController.activateLoadingMode(objectName);
         }
     });
 
-    connection.on("HologramGenerated", (modelType) => {
+    connection.on("HologramReady", (modelUrl) => {
         if (window.hologramController) {
-            window.hologramController.loadMockModel(modelType);
+            window.hologramController.loadGltfModel(modelUrl);
         }
     });
 

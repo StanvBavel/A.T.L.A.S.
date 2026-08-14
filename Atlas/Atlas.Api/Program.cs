@@ -19,11 +19,15 @@ namespace Atlas.Api
     {
         private readonly IAiProvider _aiProvider;
         private readonly IToolDispatcher _toolDispatcher;
+        private readonly IHologramGenerationService _hologramService;
+        private readonly ILogger<AtlasHub> _logger;
 
-        public AtlasHub(IAiProvider aiProvider, IToolDispatcher toolDispatcher)
+        public AtlasHub(IAiProvider aiProvider, IToolDispatcher toolDispatcher, IHologramGenerationService hologramService, ILogger<AtlasHub> logger)
         {
             _aiProvider = aiProvider;
             _toolDispatcher = toolDispatcher;
+            _hologramService = hologramService;
+            _logger = logger;
         }
 
         public override async Task OnConnectedAsync()
@@ -58,7 +62,6 @@ namespace Atlas.Api
 
             var lowerText = text.ToLower();
 
-            // 1. Hologram Stop Logic
             if (lowerText.Contains("stop hologram") || lowerText.Contains("close hologram") || lowerText.Contains("hide hologram") || lowerText.Contains("deactivate hologram"))
             {
                 await Clients.Caller.SendAsync("ReceiveMessage", "Deactivating hologram mode, Sir.");
@@ -67,19 +70,35 @@ namespace Atlas.Api
                 return;
             }
 
-            // 2. Hologram Start Logic
             if (lowerText.Contains("hologram") || lowerText.Contains("3d") || lowerText.Contains("scan"))
             {
-                // Attempt to extract the object name dynamically (e.g., "show a 3d car" -> "car")
                 var match = Regex.Match(lowerText, @"(hologram|3d|scan)\s*(of a|of an|of|for)?\s*([a-z0-9\s]+)", RegexOptions.IgnoreCase);
                 var objectName = match.Success && match.Groups.Count > 3 ? match.Groups[3].Value.Trim() : "cube";
 
-                // Store requested object state on connection contexts or handle statelessly via the ProcessCameraFrame call
-                Context.Items["RequestedHologram"] = objectName;
+                _logger.LogInformation("Client requested holographic generation for: {ObjectName}", objectName);
 
-                await Clients.Caller.SendAsync("ReceiveMessage", $"Accessing camera, generating 3D model of {objectName} now, Sir.");
-                await Clients.Caller.SendAsync("ActivateHologramMode");
-                await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
+                await Clients.Caller.SendAsync("ReceiveMessage", $"Accessing processing cluster. Generating 3D model of {objectName} now, Sir.");
+                await Clients.Caller.SendAsync("HologramGenerationStarted", objectName);
+                await Clients.Caller.SendAsync("UpdateCoreState", "PROCESSING");
+
+                // Fire and forget the actual generation so we don't block the Hub, but in MVP we await for simplicity.
+                // In production, you'd use a background worker.
+                try
+                {
+                    var modelUrl = await _hologramService.GenerateHologramAsync(objectName);
+                    await Clients.Caller.SendAsync("HologramReady", modelUrl);
+                    await Clients.Caller.SendAsync("ReceiveMessage", "Holographic projection initialized. You can now use hand gestures to interact, Sir.");
+                }
+                catch (Exception)
+                {
+                    await Clients.Caller.SendAsync("ReceiveMessage", "I encountered a critical error while synthesizing the spatial mesh, Sir.");
+                    await Clients.Caller.SendAsync("DeactivateHologramMode");
+                }
+                finally
+                {
+                    await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
+                }
+
                 return;
             }
 
@@ -91,14 +110,9 @@ namespace Atlas.Api
 
         public async Task ProcessCameraFrame(string base64Image)
         {
-            await Clients.Caller.SendAsync("UpdateCoreState", "PROCESSING");
-            await Task.Delay(2000); // Simulate ML processing time
-
-            var requestedModel = Context.Items.TryGetValue("RequestedHologram", out var val) ? val?.ToString() : "cube";
-
-            await Clients.Caller.SendAsync("HologramGenerated", requestedModel);
-            await Clients.Caller.SendAsync("ReceiveMessage", "Holographic projection initialized. You can now use hand gestures to interact.");
-            await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
+            // Legacy mock pipeline bypassed. Camera frame can be logged or used for depth analysis.
+            _logger.LogInformation("Received visual frame for spatial analysis (Length: {Length})", base64Image.Length);
+            await Task.CompletedTask;
         }
 
         public async Task GrantPermission(string toolName, string arguments)
@@ -154,21 +168,18 @@ namespace Atlas.Api
 
             builder.Services.AddHttpClient<IAiProvider, OllamaAiProvider>();
             builder.Services.AddHttpClient<IAtlasTool, ImageSearchTool>();
+            builder.Services.AddHttpClient<IHologramGenerationService, HologramGenerationService>();
 
             builder.Services.AddScoped<IMemoryRepository, MemoryRepository>();
             builder.Services.AddTransient<IAtlasTool, MemoryTool>();
 
             builder.Services.AddTransient<IAtlasTool, TimeTool>();
             builder.Services.AddTransient<IAtlasTool, SystemControlTool>();
-            // Fixed DI issue by only using HttpClient registration for ImageSearchTool earlier,
-            // but we need to supply it to ToolDispatcher. The correct pattern is to resolve via sp.GetRequiredService.
-            // Since we added `AddHttpClient<IAtlasTool, ImageSearchTool>`, it's already in the DI as an `IAtlasTool`.
 
             builder.Services.AddSingleton<PluginLoader>();
 
             builder.Services.AddTransient<IToolDispatcher>(sp =>
             {
-                // This resolves ALL implementations of IAtlasTool registered in the container
                 var builtInTools = sp.GetServices<IAtlasTool>().ToList();
                 var pluginLoader = sp.GetRequiredService<PluginLoader>();
 
