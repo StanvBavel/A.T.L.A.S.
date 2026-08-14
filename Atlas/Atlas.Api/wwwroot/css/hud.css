@@ -287,3 +287,29 @@ h1 {
     top: 0; left: 0; width: 100%; height: 100%;
     z-index: 55;
 }
+
+/* Hologram Loading Indicator */
+#hologram-loading {
+    display: none;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 70;
+    color: var(--primary-neon);
+    background: rgba(0,0,0,0.8);
+    padding: 20px;
+    border: 1px solid var(--primary-neon);
+    box-shadow: 0 0 20px rgba(0, 243, 255, 0.4);
+}
+
+#hologram-loading h2 {
+    margin: 0 0 10px 0;
+    font-size: 1.2rem;
+    animation: pulseText 1s infinite alternate;
+}
+
+#hologram-loading p {
+    margin: 0;
+    font-size: 0.9rem;
+}
