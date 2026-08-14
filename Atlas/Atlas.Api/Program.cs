@@ -28,7 +28,6 @@ namespace Atlas.Api
         public override async Task OnConnectedAsync()
         {
             await base.OnConnectedAsync();
-            // J.A.R.V.I.S.-style Greeting
             var greeting = "Welcome Sir. Shall I initialize the system diagnostics?";
             await Clients.Caller.SendAsync("ReceiveMessage", greeting);
         }
@@ -52,7 +51,14 @@ namespace Atlas.Api
                     return;
                 }
 
-                await Clients.Caller.SendAsync("ReceiveMessage", result);
+                await HandleToolResultAsync(result);
+                return;
+            }
+
+            if (text.ToLower().Contains("hologram") || text.ToLower().Contains("3d") || text.ToLower().Contains("scan"))
+            {
+                await Clients.Caller.SendAsync("ReceiveMessage", "Accessing camera, generating model now, Sir.");
+                await Clients.Caller.SendAsync("ActivateHologramMode");
                 await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
                 return;
             }
@@ -63,13 +69,50 @@ namespace Atlas.Api
             await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
         }
 
+        public async Task ProcessCameraFrame(string base64Image)
+        {
+            // Note: Generating a 3D model from a single 2D frame locally is highly complex.
+            // In a production environment, one might use a cloud API (like CSM or Luma AI)
+            // or an ONNX model ported to ML.NET for Monocular Depth Estimation.
+            // For this phase, we mock the generation and return a dummy instruction/url to trigger Three.js
+
+            await Clients.Caller.SendAsync("UpdateCoreState", "PROCESSING");
+            await Task.Delay(2000); // Simulate processing time
+
+            // Send back instruction to load the default mock geometry (e.g. a wireframe cube/car)
+            await Clients.Caller.SendAsync("HologramGenerated", "mock_cube");
+            await Clients.Caller.SendAsync("ReceiveMessage", "Holographic projection initialized. You can now use hand gestures to interact.");
+            await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
+        }
+
         public async Task GrantPermission(string toolName, string arguments)
         {
             await Clients.Caller.SendAsync("UpdateCoreState", "PROCESSING");
 
             var (success, result, permission) = await _toolDispatcher.TryExecuteToolAsync(toolName, arguments);
-            await Clients.Caller.SendAsync("ReceiveMessage", result);
+            await HandleToolResultAsync(result);
+        }
 
+        private async Task HandleToolResultAsync(string result)
+        {
+            if (result.StartsWith("IMAGE_FOUND|"))
+            {
+                var parts = result.Split('|', 3);
+                var url = parts[1];
+                var msg = parts.Length > 2 ? parts[2] : "Image retrieved.";
+
+                await Clients.Caller.SendAsync("DisplayImages", new[] { url });
+                await Clients.Caller.SendAsync("ReceiveMessage", msg);
+            }
+            else if (result.StartsWith("IMAGE_NOT_FOUND|") || result.StartsWith("IMAGE_ERROR|"))
+            {
+                var msg = result.Split('|', 2)[1];
+                await Clients.Caller.SendAsync("ReceiveMessage", msg);
+            }
+            else
+            {
+                await Clients.Caller.SendAsync("ReceiveMessage", result);
+            }
             await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
         }
 
@@ -89,9 +132,12 @@ namespace Atlas.Api
             var builder = WebApplication.CreateBuilder(args);
 
             builder.Services.AddControllers();
-            builder.Services.AddSignalR();
+            builder.Services.AddSignalR(options => {
+                options.MaximumReceiveMessageSize = 10 * 1024 * 1024; // 10MB to allow large base64 image strings
+            });
 
             builder.Services.AddHttpClient<IAiProvider, OllamaAiProvider>();
+            builder.Services.AddHttpClient<IAtlasTool, ImageSearchTool>();
 
             builder.Services.AddScoped<IMemoryRepository, MemoryRepository>();
             builder.Services.AddTransient<IAtlasTool, MemoryTool>();
@@ -99,10 +145,9 @@ namespace Atlas.Api
             builder.Services.AddTransient<IAtlasTool, TimeTool>();
             builder.Services.AddTransient<IAtlasTool, SystemControlTool>();
 
-            // Plugin Loader setup
+
             builder.Services.AddSingleton<PluginLoader>();
 
-            // Factory to combine built-in tools + plugin tools
             builder.Services.AddTransient<IToolDispatcher>(sp =>
             {
                 var builtInTools = sp.GetServices<IAtlasTool>().ToList();
