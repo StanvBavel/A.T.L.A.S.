@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace Atlas.Api
 {
@@ -55,9 +56,28 @@ namespace Atlas.Api
                 return;
             }
 
-            if (text.ToLower().Contains("hologram") || text.ToLower().Contains("3d") || text.ToLower().Contains("scan"))
+            var lowerText = text.ToLower();
+
+            // 1. Hologram Stop Logic
+            if (lowerText.Contains("stop hologram") || lowerText.Contains("close hologram") || lowerText.Contains("hide hologram") || lowerText.Contains("deactivate hologram"))
             {
-                await Clients.Caller.SendAsync("ReceiveMessage", "Accessing camera, generating model now, Sir.");
+                await Clients.Caller.SendAsync("ReceiveMessage", "Deactivating hologram mode, Sir.");
+                await Clients.Caller.SendAsync("DeactivateHologramMode");
+                await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
+                return;
+            }
+
+            // 2. Hologram Start Logic
+            if (lowerText.Contains("hologram") || lowerText.Contains("3d") || lowerText.Contains("scan"))
+            {
+                // Attempt to extract the object name dynamically (e.g., "show a 3d car" -> "car")
+                var match = Regex.Match(lowerText, @"(hologram|3d|scan)\s*(of a|of an|of|for)?\s*([a-z0-9\s]+)", RegexOptions.IgnoreCase);
+                var objectName = match.Success && match.Groups.Count > 3 ? match.Groups[3].Value.Trim() : "cube";
+
+                // Store requested object state on connection contexts or handle statelessly via the ProcessCameraFrame call
+                Context.Items["RequestedHologram"] = objectName;
+
+                await Clients.Caller.SendAsync("ReceiveMessage", $"Accessing camera, generating 3D model of {objectName} now, Sir.");
                 await Clients.Caller.SendAsync("ActivateHologramMode");
                 await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
                 return;
@@ -71,16 +91,12 @@ namespace Atlas.Api
 
         public async Task ProcessCameraFrame(string base64Image)
         {
-            // Note: Generating a 3D model from a single 2D frame locally is highly complex.
-            // In a production environment, one might use a cloud API (like CSM or Luma AI)
-            // or an ONNX model ported to ML.NET for Monocular Depth Estimation.
-            // For this phase, we mock the generation and return a dummy instruction/url to trigger Three.js
-
             await Clients.Caller.SendAsync("UpdateCoreState", "PROCESSING");
-            await Task.Delay(2000); // Simulate processing time
+            await Task.Delay(2000); // Simulate ML processing time
 
-            // Send back instruction to load the default mock geometry (e.g. a wireframe cube/car)
-            await Clients.Caller.SendAsync("HologramGenerated", "mock_cube");
+            var requestedModel = Context.Items.TryGetValue("RequestedHologram", out var val) ? val?.ToString() : "cube";
+
+            await Clients.Caller.SendAsync("HologramGenerated", requestedModel);
             await Clients.Caller.SendAsync("ReceiveMessage", "Holographic projection initialized. You can now use hand gestures to interact.");
             await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
         }
@@ -99,7 +115,7 @@ namespace Atlas.Api
             {
                 var parts = result.Split('|', 3);
                 var url = parts[1];
-                var msg = parts.Length > 2 ? parts[2] : "Image retrieved.";
+                var msg = parts.Length > 2 ? parts[2] : "Image retrieved, Sir.";
 
                 await Clients.Caller.SendAsync("DisplayImages", new[] { url });
                 await Clients.Caller.SendAsync("ReceiveMessage", msg);
@@ -133,7 +149,7 @@ namespace Atlas.Api
 
             builder.Services.AddControllers();
             builder.Services.AddSignalR(options => {
-                options.MaximumReceiveMessageSize = 10 * 1024 * 1024; // 10MB to allow large base64 image strings
+                options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
             });
 
             builder.Services.AddHttpClient<IAiProvider, OllamaAiProvider>();
@@ -144,12 +160,15 @@ namespace Atlas.Api
 
             builder.Services.AddTransient<IAtlasTool, TimeTool>();
             builder.Services.AddTransient<IAtlasTool, SystemControlTool>();
-
+            // Fixed DI issue by only using HttpClient registration for ImageSearchTool earlier,
+            // but we need to supply it to ToolDispatcher. The correct pattern is to resolve via sp.GetRequiredService.
+            // Since we added `AddHttpClient<IAtlasTool, ImageSearchTool>`, it's already in the DI as an `IAtlasTool`.
 
             builder.Services.AddSingleton<PluginLoader>();
 
             builder.Services.AddTransient<IToolDispatcher>(sp =>
             {
+                // This resolves ALL implementations of IAtlasTool registered in the container
                 var builtInTools = sp.GetServices<IAtlasTool>().ToList();
                 var pluginLoader = sp.GetRequiredService<PluginLoader>();
 
