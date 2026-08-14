@@ -6,8 +6,23 @@
     <title>A.T.L.A.S. HUD</title>
     <link rel="stylesheet" href="css/variables.css">
     <link rel="stylesheet" href="css/hud.css">
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- MediaPipe Hands (Legacy/JS version for simple integration) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 </head>
 <body>
+    <div id="hologram-overlay">
+        <div id="three-canvas-container"></div>
+        <video id="camera-video" autoplay playsinline></video>
+        <canvas id="mediapipe-canvas" style="display:none;"></canvas>
+    </div>
+
     <div id="hud-container">
 
         <div id="core-status" class="status-standby">
@@ -37,6 +52,11 @@
                     <div id="time-value" class="widget-value">--:--:--</div>
                 </div>
             </div>
+
+            <div id="image-viewer">
+                <div class="widget-header">VISUAL DATA RECEIVED</div>
+                <img id="image-viewer-img" src="" alt="A.T.L.A.S. Visual Data" />
+            </div>
         </div>
 
         <div id="input-container">
@@ -50,5 +70,6 @@
     <script src="js/signalr-client.js"></script>
     <script src="js/voice.js"></script>
     <script src="js/main.js"></script>
+    <script src="js/hologram.js"></script>
 </body>
 </html>
