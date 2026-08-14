@@ -17,8 +17,9 @@ class HologramController {
         this.mpCamera = null;
 
         // Interaction state
-        this.baseScale = 1.0;
         this.lastPinchDistance = null;
+        this.targetRotationY = 0;
+        this.targetRotationX = 0;
     }
 
     async activate() {
@@ -26,34 +27,32 @@ class HologramController {
         this.isActive = true;
         this.overlay.style.display = 'block';
 
-        // 1. Initialize Three.js Scene
         this.initThreeJs();
-
-        // 2. Start Camera and capture frame to send to backend
         await this.startCameraAndSendFrame();
     }
 
     initThreeJs() {
         this.scene = new THREE.Scene();
 
-        // Setup Camera
         const aspect = window.innerWidth / window.innerHeight;
         this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
         this.camera.position.z = 5;
 
-        // Setup Renderer
         this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.canvasContainer.innerHTML = '';
         this.canvasContainer.appendChild(this.renderer.domElement);
 
-        // Add Lights
-        const ambientLight = new THREE.AmbientLight(0x00f3ff, 0.5); // Neon Cyan Ambient
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         this.scene.add(ambientLight);
 
-        const pointLight = new THREE.PointLight(0xffffff, 1, 100);
+        const pointLight = new THREE.PointLight(0x00f3ff, 1.5, 100);
         pointLight.position.set(5, 5, 5);
         this.scene.add(pointLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(-5, 5, 5);
+        this.scene.add(dirLight);
     }
 
     async startCameraAndSendFrame() {
@@ -61,14 +60,10 @@ class HologramController {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
             this.videoElement.srcObject = stream;
 
-            // Wait for video to be ready
             this.videoElement.onloadedmetadata = () => {
                 this.videoElement.play();
-
-                // Capture frame after a short delay to ensure lighting adjusts
                 setTimeout(() => {
                     this.captureAndSendFrame();
-                    // Also start MediaPipe Hand Tracking
                     this.initMediaPipe();
                 }, 1000);
             };
@@ -85,7 +80,7 @@ class HologramController {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(this.videoElement, 0, 0, canvas.width, canvas.height);
 
-        const base64Image = canvas.toDataURL('image/jpeg', 0.5); // Compressing to 50% for transmission
+        const base64Image = canvas.toDataURL('image/jpeg', 0.5);
 
         if (window.connection && window.connection.state === signalR.HubConnectionState.Connected) {
             if (window.logMessage) window.logMessage("[SYS] Transmitting visual data to core for 3D reconstruction...");
@@ -93,11 +88,27 @@ class HologramController {
         }
     }
 
-    loadMockModel(modelType) {
-        // Creates a glowing wireframe box as the mock 3D reconstructed model
-        const geometry = new THREE.BoxGeometry(2, 2, 2);
+    loadMockModel(modelName) {
+        if (this.mockModel) {
+            this.scene.remove(this.mockModel);
+            this.mockModel = null;
+        }
 
-        // Create edges for wireframe aesthetic
+        const name = (modelName || "").toLowerCase();
+
+        // Dynamic loading based on modelName using basic shapes as fallback for demonstration,
+        // In a real scenario, use GLTFLoader to load specific GLB files based on the name.
+        let geometry;
+        if (name.includes("car") || name.includes("mustang")) {
+            geometry = new THREE.BoxGeometry(4, 1.5, 2); // Roughly car shaped
+        } else if (name.includes("sphere") || name.includes("ball")) {
+            geometry = new THREE.SphereGeometry(1.5, 32, 32);
+        } else if (name.includes("pyramid")) {
+            geometry = new THREE.ConeGeometry(2, 3, 4);
+        } else {
+            geometry = new THREE.BoxGeometry(2, 2, 2);
+        }
+
         const edges = new THREE.EdgesGeometry(geometry);
         const material = new THREE.LineBasicMaterial({ color: 0x00f3ff, linewidth: 2 });
         this.mockModel = new THREE.LineSegments(edges, material);
@@ -123,7 +134,9 @@ class HologramController {
 
         this.mpCamera = new Camera(this.videoElement, {
             onFrame: async () => {
-                await this.hands.send({image: this.videoElement});
+                if (this.isActive) {
+                    await this.hands.send({image: this.videoElement});
+                }
             },
             width: 640,
             height: 480
@@ -132,52 +145,51 @@ class HologramController {
     }
 
     onMediaPipeResults(results) {
-        if (!this.mockModel) return;
+        if (!this.mockModel || !this.isActive) return;
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
             const landmarks = results.multiHandLandmarks[0];
 
-            // Index finger tip (8) and Thumb tip (4)
             const indexTip = landmarks[8];
             const thumbTip = landmarks[4];
+            const wrist = landmarks[0];
 
-            // 1. Position mapping (Pan)
-            // Map the palm base (0) or index tip to screen space.
-            // Note: camera is mirrored, so x is inverted.
-            const targetX = (indexTip.x - 0.5) * -10;
-            const targetY = (indexTip.y - 0.5) * -10;
+            // 1. Position mapping (Pan) - using wrist for stability
+            const targetX = (wrist.x - 0.5) * -10;
+            const targetY = (wrist.y - 0.5) * -10;
 
-            // Smooth lerping
-            this.mockModel.position.x += (targetX - this.mockModel.position.x) * 0.1;
-            this.mockModel.position.y += (targetY - this.mockModel.position.y) * 0.1;
+            this.mockModel.position.x += (targetX - this.mockModel.position.x) * 0.2;
+            this.mockModel.position.y += (targetY - this.mockModel.position.y) * 0.2;
 
-            // 2. Rotation (Rotate based on wrist angle or just auto-rotate slowly, plus hand movement)
-            this.mockModel.rotation.y += (targetX * 0.05);
-            this.mockModel.rotation.x += (targetY * 0.05);
+            // 2. Rotation - Completely driven by hand position (e.g. index position relative to wrist)
+            // No auto rotation!
+            const dx = indexTip.x - wrist.x;
+            const dy = indexTip.y - wrist.y;
+
+            // Use hand angle to determine rotation target
+            this.targetRotationY = dx * Math.PI * 4; // multiplier for sensitivity
+            this.targetRotationX = dy * Math.PI * 4;
+
+            this.mockModel.rotation.y += (this.targetRotationY - this.mockModel.rotation.y) * 0.1;
+            this.mockModel.rotation.x += (this.targetRotationX - this.mockModel.rotation.x) * 0.1;
 
             // 3. Zoom (Pinch)
-            const dx = indexTip.x - thumbTip.x;
-            const dy = indexTip.y - thumbTip.y;
-            const distance = Math.sqrt(dx*dx + dy*dy);
+            const pinchDx = indexTip.x - thumbTip.x;
+            const pinchDy = indexTip.y - thumbTip.y;
+            const distance = Math.sqrt(pinchDx*pinchDx + pinchDy*pinchDy);
 
-            // If distance is small enough, it's a pinch.
-            // We scale up/down based on pinch distance changes
             if (this.lastPinchDistance !== null) {
-                const delta = distance - this.lastPinchDistance;
-                // If it's a wide open hand (distance > 0.1), let it scale normally based on absolute distance
-                let targetScale = 1.0 + (distance * 3);
+                let targetScale = 1.0 + (distance * 4);
+                targetScale = Math.max(0.3, Math.min(targetScale, 4.0));
 
-                // Clamp scale between 0.5 and 3.0
-                targetScale = Math.max(0.5, Math.min(targetScale, 3.0));
-
-                this.mockModel.scale.set(targetScale, targetScale, targetScale);
+                // Smooth scale
+                this.mockModel.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
             }
             this.lastPinchDistance = distance;
 
         } else {
-            // Idle animation when no hands detected
-            this.mockModel.rotation.y += 0.01;
-            this.mockModel.rotation.x += 0.005;
+            // When no hand is detected, we do NOT auto-rotate anymore.
+            // Model stays in its last mapped position/rotation.
             this.lastPinchDistance = null;
         }
     }
@@ -192,23 +204,41 @@ class HologramController {
     }
 
     deactivate() {
+        if (!this.isActive) return;
         this.isActive = false;
+
+        // Hide UI
         this.overlay.style.display = 'none';
 
+        // Stop MediaPipe
         if (this.mpCamera) {
             this.mpCamera.stop();
         }
+        if (this.hands) {
+            this.hands.close();
+        }
 
+        // Stop Camera Stream
         const stream = this.videoElement.srcObject;
         if (stream) {
             stream.getTracks().forEach(track => track.stop());
             this.videoElement.srcObject = null;
         }
 
+        // Clean Three.js Scene
         if (this.scene && this.mockModel) {
             this.scene.remove(this.mockModel);
+            // Dispose geometries and materials
+            this.mockModel.geometry.dispose();
+            this.mockModel.material.dispose();
             this.mockModel = null;
         }
+
+        if (this.renderer) {
+            this.canvasContainer.innerHTML = ''; // clear dom
+        }
+
+        if (window.logMessage) window.logMessage("[SYS] Hologram and camera systems deactivated.");
     }
 }
 

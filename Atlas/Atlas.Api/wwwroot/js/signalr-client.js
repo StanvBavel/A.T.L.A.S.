@@ -45,7 +45,6 @@ function startSignalR() {
         }
     });
 
-    // --- New Hologram Events ---
     connection.on("ActivateHologramMode", () => {
         if (window.hologramController) {
             window.hologramController.activate();
@@ -55,6 +54,12 @@ function startSignalR() {
     connection.on("HologramGenerated", (modelType) => {
         if (window.hologramController) {
             window.hologramController.loadMockModel(modelType);
+        }
+    });
+
+    connection.on("DeactivateHologramMode", () => {
+        if (window.hologramController) {
+            window.hologramController.deactivate();
         }
     });
 
