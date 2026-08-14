@@ -1,0 +1,137 @@
+body {
+    background-color: var(--bg-color);
+    color: var(--primary-neon);
+    font-family: var(--font-main);
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+    position: relative;
+    background: radial-gradient(circle at center, #111 0%, #000 100%);
+}
+
+/* Holographic overlay */
+body::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: linear-gradient(rgba(0, 243, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 243, 255, 0.05) 1px, transparent 1px);
+    background-size: 20px 20px;
+    pointer-events: none;
+    z-index: 1;
+}
+
+#hud-container {
+    text-align: center;
+    z-index: 2;
+    background: rgba(0,0,0,0.7);
+    padding: 30px;
+    border: 1px solid var(--primary-neon);
+    box-shadow: 0 0 20px rgba(0, 243, 255, 0.2);
+    position: relative;
+}
+
+/* Core Animaties gebaseerd op State */
+#core-status {
+    margin-bottom: 20px;
+}
+
+h1 {
+    font-size: 4rem;
+    margin: 0 0 10px 0;
+    letter-spacing: 5px;
+    transition: all 0.3s ease;
+}
+
+.status-standby h1 { text-shadow: 0 0 20px var(--primary-neon); color: var(--primary-neon); }
+.status-listening h1 { text-shadow: 0 0 30px #0f0; color: #0f0; }
+.status-thinking h1 { text-shadow: 0 0 30px #ff0; color: #ff0; animation: pulse 1s infinite; }
+.status-speaking h1 { text-shadow: 0 0 30px #f0f; color: #f0f; }
+.status-processing h1 { text-shadow: 0 0 30px var(--secondary-neon); color: var(--secondary-neon); animation: pulse 0.5s infinite; }
+
+@keyframes pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.05); opacity: 0.8; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+#status-text {
+    font-size: 1.2rem;
+    letter-spacing: 2px;
+}
+
+/* UI Layout */
+.layout-row {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+}
+
+#log-container {
+    height: 300px;
+    width: 600px;
+    overflow-y: auto;
+    border: 1px solid rgba(0, 243, 255, 0.3);
+    padding: 15px;
+    text-align: left;
+    background: rgba(0, 243, 255, 0.05);
+    font-size: 0.9rem;
+}
+
+#widgets-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 250px;
+}
+
+.widget {
+    border: 1px solid rgba(0, 243, 255, 0.5);
+    padding: 15px;
+    text-align: left;
+    background: rgba(0,0,0,0.5);
+}
+
+.widget h3 {
+    margin: 0 0 10px 0;
+    font-size: 1rem;
+    border-bottom: 1px solid rgba(0, 243, 255, 0.3);
+    padding-bottom: 5px;
+}
+
+.widget-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+/* Inputs */
+#input-container {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+}
+
+#chat-input, #send-button, #mic-button {
+    background: transparent;
+    border: 1px solid var(--primary-neon);
+    color: var(--primary-neon);
+    padding: 10px;
+    font-family: var(--font-main);
+    z-index: 2;
+}
+
+#chat-input { width: 500px; font-size: 1rem; }
+#chat-input:focus { outline: none; box-shadow: 0 0 10px var(--primary-neon); background: rgba(0,243,255,0.1); }
+#send-button, #mic-button { cursor: pointer; font-weight: bold; text-transform: uppercase; }
+#send-button:hover, #mic-button:hover { background: var(--primary-neon); color: var(--bg-color); }
+#mic-button.active { background: #0f0; color: #000; border-color: #0f0; }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0, 243, 255, 0.5); }

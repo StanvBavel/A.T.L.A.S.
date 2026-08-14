@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A.T.L.A.S. HUD</title>
+    <link rel="stylesheet" href="css/variables.css">
+    <link rel="stylesheet" href="css/hud.css">
+</head>
+<body>
+    <div id="hud-container">
+        <div id="core-status" class="status-standby">
+            <h1>A.T.L.A.S.</h1>
+            <p id="status-text">SYSTEM ONLINE / STANDBY</p>
+        </div>
+
+        <div class="layout-row">
+            <div id="log-container"></div>
+
+            <div id="widgets-container">
+                <div class="widget">
+                    <h3>SYSTEM MEMORY</h3>
+                    <div id="ram-value" class="widget-value">-- GB</div>
+                </div>
+                <div class="widget">
+                    <h3>CPU LOAD</h3>
+                    <div id="cpu-value" class="widget-value">-- %</div>
+                </div>
+                <div class="widget">
+                    <h3>TIME</h3>
+                    <div id="time-value" class="widget-value">--:--:--</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="input-container">
+            <button id="mic-button">🎤 MIC</button>
+            <input type="text" id="chat-input" placeholder="Initialize command sequence..." autocomplete="off" />
+            <button id="send-button">EXECUTE</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <script src="js/signalr-client.js"></script>
+    <script src="js/voice.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
