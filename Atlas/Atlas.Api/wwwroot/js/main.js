@@ -1,7 +1,16 @@
 function logMessage(msg) {
     const logContainer = document.getElementById('log-container');
     const entry = document.createElement('div');
-    entry.innerHTML = `<span style="color:rgba(255,255,255,0.5)">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
+
+    const timestampSpan = document.createElement('span');
+    timestampSpan.style.color = "rgba(255,255,255,0.5)";
+    timestampSpan.textContent = `[${new Date().toLocaleTimeString()}] `;
+
+    const textNode = document.createTextNode(msg);
+
+    entry.appendChild(timestampSpan);
+    entry.appendChild(textNode);
+
     logContainer.appendChild(entry);
     logContainer.scrollTop = logContainer.scrollHeight;
 }
@@ -18,7 +27,7 @@ function handleSend() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
     if (text) {
-        logMessage(`[USER]: <span style="color:#fff">${text}</span>`);
+        logMessage(`[USER]: ${text}`);
         sendToServer(text);
         input.value = '';
     }
@@ -39,9 +48,9 @@ function updateWidgets() {
     const now = new Date();
     document.getElementById('time-value').innerText = now.toLocaleTimeString();
 
-    // Request telemetry from server
-    if (window.connection && window.connection.state === "Connected") {
-        window.connection.invoke("RequestTelemetry").catch(e => console.error(e));
+    // Request telemetry from server if connected
+    if (typeof connection !== 'undefined' && connection.state === "Connected") {
+        connection.invoke("RequestTelemetry").catch(e => console.error(e));
     }
 }
 

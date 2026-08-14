@@ -13,6 +13,11 @@ namespace Atlas.Application
         private readonly ILogger<PluginLoader> _logger;
         private readonly string _pluginsDirectory;
 
+        // Cache plugins so we only load them from disk once
+        private readonly List<IAtlasPlugin> _loadedPlugins = new List<IAtlasPlugin>();
+        private bool _isLoaded = false;
+        private readonly object _lock = new object();
+
         public PluginLoader(ILogger<PluginLoader> logger)
         {
             _logger = logger;
@@ -21,42 +26,50 @@ namespace Atlas.Application
 
         public IEnumerable<IAtlasPlugin> LoadPlugins()
         {
-            var plugins = new List<IAtlasPlugin>();
-
-            if (!Directory.Exists(_pluginsDirectory))
+            lock (_lock)
             {
-                Directory.CreateDirectory(_pluginsDirectory);
-                _logger.LogInformation("Created Plugins directory at {Path}", _pluginsDirectory);
-                return plugins;
-            }
-
-            var dllFiles = Directory.GetFiles(_pluginsDirectory, "*.dll");
-
-            foreach (var file in dllFiles)
-            {
-                try
+                if (_isLoaded)
                 {
-                    var assembly = Assembly.LoadFrom(file);
-                    var pluginTypes = assembly.GetTypes()
-                        .Where(t => typeof(IAtlasPlugin).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract);
+                    return _loadedPlugins;
+                }
 
-                    foreach (var type in pluginTypes)
+                if (!Directory.Exists(_pluginsDirectory))
+                {
+                    Directory.CreateDirectory(_pluginsDirectory);
+                    _logger.LogInformation("Created Plugins directory at {Path}", _pluginsDirectory);
+                    _isLoaded = true;
+                    return _loadedPlugins;
+                }
+
+                var dllFiles = Directory.GetFiles(_pluginsDirectory, "*.dll");
+
+                foreach (var file in dllFiles)
+                {
+                    try
                     {
-                        if (Activator.CreateInstance(type) is IAtlasPlugin plugin)
+                        var assembly = Assembly.LoadFrom(file);
+                        var pluginTypes = assembly.GetTypes()
+                            .Where(t => typeof(IAtlasPlugin).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract);
+
+                        foreach (var type in pluginTypes)
                         {
-                            plugin.Initialize();
-                            plugins.Add(plugin);
-                            _logger.LogInformation("Loaded plugin: {PluginName} v{Version}", plugin.PluginName, plugin.Version);
+                            if (Activator.CreateInstance(type) is IAtlasPlugin plugin)
+                            {
+                                plugin.Initialize();
+                                _loadedPlugins.Add(plugin);
+                                _logger.LogInformation("Loaded plugin: {PluginName} v{Version}", plugin.PluginName, plugin.Version);
+                            }
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to load plugin from {File}", file);
+                    }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to load plugin from {File}", file);
-                }
-            }
 
-            return plugins;
+                _isLoaded = true;
+                return _loadedPlugins;
+            }
         }
     }
 }
