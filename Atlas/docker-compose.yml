@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # C# Backend API (Optional: usually run locally via dotnet run during dev, but prepared here)
+  # atlas_backend:
+  #   build: ./src/Backend
+  #   ports:
+  #     - "5258:5258"
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: atlas_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - atlas_net
+
+  atlas_image_service:
+    build:
+      context: ./src/AI.ImageService
+      dockerfile: Dockerfile
+    container_name: atlas_image_service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./hf_cache:/root/.cache/huggingface
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - atlas_net
+
+  atlas_3d_service:
+    build:
+      context: ./src/AI.HologramService
+      dockerfile: Dockerfile
+    container_name: atlas_3d_service
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./hf_cache:/root/.cache/huggingface
+      - ./shap_e_cache:/root/.cache/shap-e
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - atlas_net
+
+networks:
+  atlas_net:
+    driver: bridge
