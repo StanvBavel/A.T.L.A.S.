@@ -77,7 +77,7 @@ namespace Atlas.Application
 
                     if (status == "SUCCEEDED")
                     {
-                        if (statusDoc.RootElement.TryGetProperty("glb_url", out var glbUrlElement))
+                        if (statusDoc.RootElement.TryGetProperty("obj_url", out var glbUrlElement))
                         {
                             var glbUrl = glbUrlElement.GetString();
                             _logger.LogInformation("[LOCAL HOLOGRAM SERVICE] Local mesh synthesis complete. Resolving asset: {Url}", glbUrl);
