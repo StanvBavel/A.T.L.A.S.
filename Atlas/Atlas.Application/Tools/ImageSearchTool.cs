@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Atlas.Core;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Atlas.Application.Tools
@@ -11,16 +12,17 @@ namespace Atlas.Application.Tools
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger<ImageSearchTool> _logger;
+        private readonly string _unsplashApiKey;
 
         public string Name => "ImageSearch";
-        public string Description => "Searches the web for an image based on a query and returns the URL.";
+        public string Description => "Search the web for an image of an object.";
         public PermissionLevel RequiredPermission => PermissionLevel.Safe;
 
-        public ImageSearchTool(HttpClient httpClient, ILogger<ImageSearchTool> logger)
+        public ImageSearchTool(HttpClient httpClient, IConfiguration configuration, ILogger<ImageSearchTool> logger)
         {
             _httpClient = httpClient;
             _logger = logger;
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", "ATLAS-AI-Assistant/1.0");
+            _unsplashApiKey = configuration["UnsplashApiKey"] ?? string.Empty;
         }
 
         public async Task<string> ExecuteAsync(string arguments)
@@ -33,33 +35,42 @@ namespace Atlas.Application.Tools
 
             _logger.LogInformation("[IMAGE SEARCH] Initiating visual database query for: '{Query}'", arguments);
 
+            if (string.IsNullOrEmpty(_unsplashApiKey))
+            {
+                _logger.LogWarning("[IMAGE SEARCH] UnsplashApiKey not configured in appsettings.json.");
+                return "IMAGE_ERROR|The visual database API key is not configured, Sir.";
+            }
+
             try
             {
-                var url = $"https://en.wikipedia.org/w/api.php?action=query&titles={Uri.EscapeDataString(arguments)}&prop=pageimages&format=json&pithumbsize=800";
-                _logger.LogInformation("[IMAGE SEARCH] Accessing endpoint: {Url}", url);
+                // Unsplash Search API endpoint
+                var url = $"https://api.unsplash.com/search/photos?query={Uri.EscapeDataString(arguments)}&per_page=1&client_id={_unsplashApiKey}";
+                _logger.LogInformation("[IMAGE SEARCH] Accessing Unsplash API.");
 
                 var response = await _httpClient.GetAsync(url);
-                _logger.LogInformation("[IMAGE SEARCH] Received HTTP {StatusCode}", response.StatusCode);
 
-                response.EnsureSuccessStatusCode();
-
-                var json = await response.Content.ReadAsStringAsync();
-                var doc = JsonDocument.Parse(json);
-
-                var pages = doc.RootElement.GetProperty("query").GetProperty("pages");
-
-                foreach (var page in pages.EnumerateObject())
+                if (!response.IsSuccessStatusCode)
                 {
-                    if (page.Value.TryGetProperty("thumbnail", out var thumbnail) &&
-                        thumbnail.TryGetProperty("source", out var source))
-                    {
-                        var imageUrl = source.GetString();
-                        _logger.LogInformation("[IMAGE SEARCH] Successfully retrieved visual asset: {Src}", imageUrl);
-                        return $"IMAGE_FOUND|{imageUrl}|Visual data retrieved for '{arguments}', Sir.";
-                    }
+                    _logger.LogWarning("[IMAGE SEARCH] Unsplash API returned {StatusCode}.", response.StatusCode);
+                    return "IMAGE_ERROR|I encountered a communication error with the visual database, Sir.";
                 }
 
-                _logger.LogWarning("[IMAGE SEARCH] No visual data found in the Wikipedia response for '{Query}'.", arguments);
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+
+                var results = doc.RootElement.GetProperty("results");
+
+                if (results.GetArrayLength() > 0)
+                {
+                    var firstResult = results[0];
+                    var urls = firstResult.GetProperty("urls");
+                    var imageUrl = urls.GetProperty("regular").GetString(); // Get a good resolution
+
+                    _logger.LogInformation("[IMAGE SEARCH] Successfully retrieved visual asset: {Src}", imageUrl);
+                    return $"IMAGE_FOUND|{imageUrl}|Visual data retrieved for '{arguments}', Sir.";
+                }
+
+                _logger.LogInformation("[IMAGE SEARCH] No images found for '{Query}'.", arguments);
                 return $"IMAGE_NOT_FOUND|I was unable to retrieve an image for that query, Sir.";
             }
             catch (Exception ex)

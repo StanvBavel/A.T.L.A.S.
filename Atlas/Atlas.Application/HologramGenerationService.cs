@@ -1,8 +1,10 @@
 using System;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Atlas.Application
@@ -16,67 +18,92 @@ namespace Atlas.Application
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger<HologramGenerationService> _logger;
-        // Mock endpoints for the REST API structure
-        private const string GenerateEndpoint = "https://mock-3d-api.atlas.local/v1/text-to-3d";
-        private const string StatusEndpoint = "https://mock-3d-api.atlas.local/v1/tasks/";
+        private readonly string _apiKey;
+        private const string BaseUrl = "https://api.meshy.ai/v2/text-to-3d";
 
-        public HologramGenerationService(HttpClient httpClient, ILogger<HologramGenerationService> logger)
+        public HologramGenerationService(HttpClient httpClient, IConfiguration configuration, ILogger<HologramGenerationService> logger)
         {
             _httpClient = httpClient;
             _logger = logger;
-            // Simulated Authorization
-            _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer MOCK_API_KEY");
+            _apiKey = configuration["MeshyApiKey"] ?? string.Empty;
+
+            if (!string.IsNullOrEmpty(_apiKey))
+            {
+                _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+            }
         }
 
         public async Task<string> GenerateHologramAsync(string prompt)
         {
-            _logger.LogInformation("[HOLOGRAM SERVICE] Initiating spatial mesh synthesis for: '{Prompt}'", prompt);
+            if (string.IsNullOrEmpty(_apiKey))
+            {
+                _logger.LogWarning("[HOLOGRAM SERVICE] MeshyApiKey not configured. Returning fallback model.");
+                return "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Box/glTF-Binary/Box.glb";
+            }
+
+            _logger.LogInformation("[HOLOGRAM SERVICE] Initiating Meshy.ai text-to-3d synthesis for: '{Prompt}'", prompt);
 
             try
             {
-                // 1. Submit task
-                _logger.LogInformation("[HOLOGRAM SERVICE] Submitting generation task to remote processing cluster (POST {Endpoint})...", GenerateEndpoint);
+                // 1. Submit task to Meshy.ai
+                var payload = new
+                {
+                    mode = "preview",
+                    prompt = prompt,
+                    art_style = "realistic",
+                    should_remesh = true
+                };
 
-                // Real implementation would POST to the API:
-                // var content = new StringContent(JsonSerializer.Serialize(new { prompt = prompt }), Encoding.UTF8, "application/json");
-                // var response = await _httpClient.PostAsync(GenerateEndpoint, content);
-                // response.EnsureSuccessStatusCode();
-                // var jsonResponse = await response.Content.ReadAsStringAsync();
-                // var taskId = JsonDocument.Parse(jsonResponse).RootElement.GetProperty("result").GetString();
+                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                var response = await _httpClient.PostAsync(BaseUrl, content);
 
-                await Task.Delay(1500); // Simulate network latency
-                string taskId = Guid.NewGuid().ToString();
-                _logger.LogInformation("[HOLOGRAM SERVICE] Task accepted. Assigned Task ID: {TaskId}. Commencing status polling loop.", taskId);
+                response.EnsureSuccessStatusCode();
+
+                var jsonResponse = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(jsonResponse);
+
+                if (!doc.RootElement.TryGetProperty("result", out var resultProp))
+                {
+                    throw new Exception("Meshy API response did not contain a 'result' Task ID.");
+                }
+
+                var taskId = resultProp.GetString();
+                _logger.LogInformation("[HOLOGRAM SERVICE] Task accepted by Meshy.ai. Task ID: {TaskId}. Commencing polling...", taskId);
 
                 // 2. Poll status
                 int retries = 0;
-                int maxRetries = 10;
-                string status = "PENDING";
+                int maxRetries = 60; // 60 * 2 = 120 seconds max wait for preview model
 
                 while (retries < maxRetries)
                 {
                     _logger.LogInformation("[HOLOGRAM SERVICE] Polling status... Attempt {Attempt}/{MaxRetries}", retries + 1, maxRetries);
 
-                    // Real implementation:
-                    // var statusResponse = await _httpClient.GetAsync($"{StatusEndpoint}{taskId}");
-                    // var statusJson = await statusResponse.Content.ReadAsStringAsync();
-                    // var root = JsonDocument.Parse(statusJson).RootElement;
-                    // status = root.GetProperty("status").GetString();
-                    // if (status == "SUCCEEDED") return root.GetProperty("model_urls").GetProperty("glb").GetString();
+                    var statusResponse = await _httpClient.GetAsync($"{BaseUrl}/{taskId}");
+                    statusResponse.EnsureSuccessStatusCode();
 
-                    await Task.Delay(2000); // Simulate processing time and wait between polls
+                    var statusJson = await statusResponse.Content.ReadAsStringAsync();
+                    using var statusDoc = JsonDocument.Parse(statusJson);
+                    var root = statusDoc.RootElement;
 
-                    // Mocking progression: Pending -> Processing -> Succeeded
-                    if (retries == 1) status = "PROCESSING";
-                    if (retries == 3) status = "SUCCEEDED";
+                    var status = root.GetProperty("status").GetString();
 
                     if (status == "SUCCEEDED")
                     {
-                        _logger.LogInformation("[HOLOGRAM SERVICE] Mesh synthesis complete. Retrieving asset URL.");
-                        // Return a known raw github URL for a basic GLB file for the MVP to actually load in Three.js
-                        return "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Box/glTF-Binary/Box.glb";
+                        var modelUrls = root.GetProperty("model_urls");
+                        if (modelUrls.TryGetProperty("glb", out var glbUrlProp))
+                        {
+                            var glbUrl = glbUrlProp.GetString();
+                            _logger.LogInformation("[HOLOGRAM SERVICE] Mesh synthesis complete. URL: {Url}", glbUrl);
+                            return glbUrl;
+                        }
+                    }
+                    else if (status == "FAILED" || status == "EXPIRED")
+                    {
+                        _logger.LogError("[HOLOGRAM SERVICE] Meshy generation failed. Status: {Status}", status);
+                        throw new Exception($"Generation failed with status: {status}");
                     }
 
+                    await Task.Delay(2000);
                     retries++;
                 }
 

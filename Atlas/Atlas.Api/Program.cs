@@ -11,7 +11,6 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System;
 using System.Linq;
-using System.Text.RegularExpressions;
 
 namespace Atlas.Api
 {
@@ -41,9 +40,14 @@ namespace Atlas.Api
         {
             await Clients.Caller.SendAsync("UpdateCoreState", "THINKING");
 
-            if (text.StartsWith("/tool "))
+            // Pass the raw user input directly to the LLM.
+            // The LLM will decide via Function Calling whether to return standard text, or an internal command string (e.g. "/tool ImageSearch")
+            var response = await _aiProvider.GenerateResponseAsync(text);
+
+            // Process LLM routing outcomes
+            if (response.StartsWith("/tool "))
             {
-                var parts = text.Substring(6).Split(' ', 2);
+                var parts = response.Substring(6).Split(' ', 2);
                 var toolName = parts[0];
                 var args = parts.Length > 1 ? parts[1] : "";
 
@@ -60,29 +64,15 @@ namespace Atlas.Api
                 return;
             }
 
-            var lowerText = text.ToLower();
-
-            if (lowerText.Contains("stop hologram") || lowerText.Contains("close hologram") || lowerText.Contains("hide hologram") || lowerText.Contains("deactivate hologram"))
+            if (response.StartsWith("/hologram start "))
             {
-                await Clients.Caller.SendAsync("ReceiveMessage", "Deactivating hologram mode, Sir.");
-                await Clients.Caller.SendAsync("DeactivateHologramMode");
-                await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
-                return;
-            }
-
-            if (lowerText.Contains("hologram") || lowerText.Contains("3d") || lowerText.Contains("scan"))
-            {
-                var match = Regex.Match(lowerText, @"(hologram|3d|scan)\s*(of a|of an|of|for)?\s*([a-z0-9\s]+)", RegexOptions.IgnoreCase);
-                var objectName = match.Success && match.Groups.Count > 3 ? match.Groups[3].Value.Trim() : "cube";
-
-                _logger.LogInformation("Client requested holographic generation for: {ObjectName}", objectName);
+                var objectName = response.Substring(16).Trim();
+                _logger.LogInformation("LLM triggered holographic generation for: {ObjectName}", objectName);
 
                 await Clients.Caller.SendAsync("ReceiveMessage", $"Accessing processing cluster. Generating 3D model of {objectName} now, Sir.");
                 await Clients.Caller.SendAsync("HologramGenerationStarted", objectName);
                 await Clients.Caller.SendAsync("UpdateCoreState", "PROCESSING");
 
-                // Fire and forget the actual generation so we don't block the Hub, but in MVP we await for simplicity.
-                // In production, you'd use a background worker.
                 try
                 {
                     var modelUrl = await _hologramService.GenerateHologramAsync(objectName);
@@ -98,20 +88,24 @@ namespace Atlas.Api
                 {
                     await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
                 }
-
                 return;
             }
 
-            var response = await _aiProvider.GenerateResponseAsync(text);
+            if (response == "/hologram stop")
+            {
+                await Clients.Caller.SendAsync("ReceiveMessage", "Deactivating hologram mode, Sir.");
+                await Clients.Caller.SendAsync("DeactivateHologramMode");
+                await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
+                return;
+            }
 
+            // Normal text response
             await Clients.Caller.SendAsync("ReceiveMessage", response);
             await Clients.Caller.SendAsync("UpdateCoreState", "STANDBY");
         }
 
         public async Task ProcessCameraFrame(string base64Image)
         {
-            // Legacy mock pipeline bypassed. Camera frame can be logged or used for depth analysis.
-            _logger.LogInformation("Received visual frame for spatial analysis (Length: {Length})", base64Image.Length);
             await Task.CompletedTask;
         }
 
