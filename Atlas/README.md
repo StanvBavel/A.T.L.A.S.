@@ -1,22 +1,82 @@
 # A.T.L.A.S. (Autonomous Technological Logic & Assistance System)
 
-## Projectbeschrijving
-A.T.L.A.S. is een moderne, lokaal draaiende AI-assistent geïnspireerd door J.A.R.V.I.S. Het is geen simpele chatbot, maar een robuuste integratie van een Large Language Model (LLM), systeembeheer, en een Personal Knowledge Base (langetermijngeheugen). Het project is ontworpen als een veilige, modulaire desktop/web-assistent die je computer lokaal kan bedienen en tegelijkertijd contextueel bewust is.
+A.T.L.A.S. is a fully autonomous, 100% locally-hosted AI assistant inspired by J.A.R.V.I.S. It leverages local large language models (Ollama) to parse intents, uses local HTML scraping for visual data, and connects to local Docker containers for generating 3D spatial meshes without relying on any external cloud APIs.
 
-De interface is een futuristische HUD (Head-Up Display) gebouwd in Vanilla HTML/CSS/JS, aangedreven door een high-performance .NET 8 ASP.NET Core backend. Communicatie verloopt realtime via SignalR.
+## System Architecture
 
-## Prerequisites
-Voor het succesvol draaien van A.T.L.A.S. op een Windows-machine heb je het volgende nodig:
-- **Besturingssysteem:** Windows 10 of 11 (voor volledige System Control functies).
-- **.NET SDK:** [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
-- **Ollama:** [Ollama](https://ollama.com/) geïnstalleerd en draaiend op `http://localhost:11434`.
-- **LLM Model:** Een model gedownload in Ollama (bijv. `llama3.2` of `phi3`). Voer `ollama run llama3.2` uit in je terminal.
+```text
+[ SVELTE FRONTEND (Vite) ] ──(SignalR)──┐
+  │ - Three.js Holograms                │
+  │ - MediaPipe Barehands Tracking      │
+  │ - Web Speech API (STT/TTS)          ▼
+  │                               [ C# .NET 8 BACKEND ]
+  │                                     │
+  │                                     ├──► [ Ollama (Local LLM via Port 11434) ]
+  │                                     │      (Function Calling & Intent Routing)
+  │                                     │
+  │                                     ├──► [ Local Image Search Service ]
+  │                                     │      (HtmlAgilityPack Web Scraper)
+  │                                     │
+  │                                     └──► [ Local 3D Generation API ]
+  │                                            (Dockerized TripoSR/Shap-E via Port 5000)
+  ▼
+[ USER HUD ]
+```
 
-## Installatie & Configuratie
-A.T.L.A.S. gebruikt de Options Pattern. We vermijden hardcoded instellingen.
+## Prerequisites & Infrastructure
+Because A.T.L.A.S. is entirely on-premise, your system acts as the entire AI cluster. You will need:
+- **.NET 8.0 SDK**
+- **Node.js & NPM**
+- **Docker Desktop** (for running the external local AI models)
 
-1. Clone de repository naar je lokale machine.
-2. Maak een `appsettings.json` (indien nog niet aanwezig) in de `Atlas/Atlas.Api/` map met de volgende inhoud:
+### 1. Docker Compose Setup
+Create a `docker-compose.yml` file in your preferred AI models directory with the following structure to host the required localized AI engines:
+
+```yaml
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: atlas_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  stable-diffusion:
+    # Optional image fallback endpoint
+    image: originalgarments/stable-diffusion-webui-docker
+    container_name: atlas_stable_diffusion
+    ports:
+      - "7860:7860"
+    environment:
+      - COMMANDLINE_ARGS=--api --listen
+
+  tripo-sr:
+    # Example local 3D generation API (replace with specific Python API image)
+    image: local-tripo-sr-api:latest
+    container_name: atlas_3d_api
+    ports:
+      - "5000:5000"
+```
+
+Start the engines:
+```bash
+docker-compose up -d
+```
+
+### 2. Pulling the Language Model
+Once the Ollama container is running, execute the following command to pull a model highly capable of JSON Tool Calling (like `llama3.1` or `mistral`):
+```bash
+docker exec -it atlas_ollama ollama run llama3.1
+```
+
+## Installation & Configuration
+
+A.T.L.A.S. explicitly forbids the use of external cloud API keys for visual or spatial synthesis. Update your `Atlas.Api/appsettings.json` to point exclusively to localhost instances:
+
 ```json
 {
   "Logging": {
@@ -30,26 +90,33 @@ A.T.L.A.S. gebruikt de Options Pattern. We vermijden hardcoded instellingen.
     "DefaultConnection": "Data Source=atlas.sqlite"
   },
   "AiSettings": {
-    "OllamaEndpoint": "http://localhost:11434/api/generate",
-    "ModelName": "llama3.2"
+    "OllamaEndpoint": "http://localhost:11434/api/chat",
+    "ModelName": "llama3.1"
+  },
+  "Local3DApi": {
+    "Endpoint": "http://localhost:5000/generate-3d",
+    "StatusEndpoint": "http://localhost:5000/tasks/"
   }
 }
 ```
 
-## Starten
-Om A.T.L.A.S. te starten:
-1. Zorg dat Ollama op de achtergrond draait.
-2. Open een terminal/opdrachtprompt in de root van het project (`Atlas/Atlas.Api`).
-3. Voer het volgende commando uit:
+## Running A.T.L.A.S.
+
+1. **Build Frontend:**
+   Navigate to the `atlas-frontend` directory and build the Svelte app:
    ```bash
+   cd atlas-frontend
+   npm install
+   npm run build
+   cp -R dist/* ../Atlas.Api/wwwroot/
+   ```
+
+2. **Start Core Server:**
+   Navigate to the `Atlas.Api` directory and launch the C# backend:
+   ```bash
+   cd ../Atlas.Api
    dotnet run
    ```
-4. De applicatie zal opstarten en de SQLite database automatisch genereren.
-5. Open je browser en ga naar `http://localhost:5258` (of de poort getoond in de console) om de A.T.L.A.S. HUD te laden.
 
-## Architectuur
-A.T.L.A.S. volgt de Clean Architecture principes.
-- **Frontend (`wwwroot`):** Bestaat uitsluitend uit Vanilla JS, HTML en CSS. Geen complexe frameworks. Het verzorgt de grafische HUD, audio-opname via de Web Speech API (Wake-word detectie) en Spraaksynthese (TTS).
-- **SignalR Hub (`AtlasHub`):** Vormt de brug tussen frontend en backend. Alle commando's en UI-statussen (zoals THINKING, PROCESSING) verlopen asynchroon in realtime.
-- **Backend (C#/.NET 8):** Beheert de veiligheid via de `PermissionEngine`. Tools (`IAtlasTool`) en Plugins (`IAtlasPlugin`) worden uitgevoerd via de `ToolDispatcher`. Gevaarlijke commando's sturen een `RequireUserConsent` event naar de frontend voordat ze de executie vervolgen.
-- **LLM Integratie:** Geabstraheerd achter `IAiProvider`, waardoor de applicatie model-agnostisch is, hoewel standaard geconfigureerd voor lokaal gebruik via Ollama.
+3. **Engage System:**
+   Open your browser to `http://localhost:5258` (or the port specified in the console). When the interface loads, authorize microphone and camera access to engage the Spatial Hand Tracking and Neural Voice Link.
