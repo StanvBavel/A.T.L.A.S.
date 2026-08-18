@@ -1,6 +1,5 @@
 using System;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -18,88 +17,77 @@ namespace Atlas.Application
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger<HologramGenerationService> _logger;
-        private readonly string _apiKey;
-        private const string BaseUrl = "https://api.meshy.ai/v2/text-to-3d";
+        private readonly string _generateEndpoint;
+        private readonly string _statusEndpoint;
 
         public HologramGenerationService(HttpClient httpClient, IConfiguration configuration, ILogger<HologramGenerationService> logger)
         {
             _httpClient = httpClient;
             _logger = logger;
-            _apiKey = configuration["MeshyApiKey"] ?? string.Empty;
-
-            if (!string.IsNullOrEmpty(_apiKey))
-            {
-                _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-            }
+            _generateEndpoint = configuration["Local3DApi:Endpoint"] ?? "http://localhost:5000/generate-3d";
+            _statusEndpoint = configuration["Local3DApi:StatusEndpoint"] ?? "http://localhost:5000/tasks/";
         }
 
         public async Task<string> GenerateHologramAsync(string prompt)
         {
-            if (string.IsNullOrEmpty(_apiKey))
-            {
-                _logger.LogWarning("[HOLOGRAM SERVICE] MeshyApiKey not configured. Returning fallback model.");
-                return "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Box/glTF-Binary/Box.glb";
-            }
-
-            _logger.LogInformation("[HOLOGRAM SERVICE] Initiating Meshy.ai text-to-3d synthesis for: '{Prompt}'", prompt);
+            _logger.LogInformation("[LOCAL HOLOGRAM SERVICE] Initiating local spatial mesh synthesis for: '{Prompt}'", prompt);
 
             try
             {
-                // 1. Submit task to Meshy.ai
-                var payload = new
-                {
-                    mode = "preview",
-                    prompt = prompt,
-                    art_style = "realistic",
-                    should_remesh = true
-                };
-
+                // 1. Submit task to local Docker container (e.g. TripoSR or Shap-E)
+                var payload = new { prompt = prompt };
                 var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-                var response = await _httpClient.PostAsync(BaseUrl, content);
 
+                _logger.LogInformation("[LOCAL HOLOGRAM SERVICE] Dispatching to localized cluster: {Url}", _generateEndpoint);
+
+                var response = await _httpClient.PostAsync(_generateEndpoint, content);
                 response.EnsureSuccessStatusCode();
 
                 var jsonResponse = await response.Content.ReadAsStringAsync();
                 using var doc = JsonDocument.Parse(jsonResponse);
 
-                if (!doc.RootElement.TryGetProperty("result", out var resultProp))
+                if (!doc.RootElement.TryGetProperty("task_id", out var taskIdElement))
                 {
-                    throw new Exception("Meshy API response did not contain a 'result' Task ID.");
+                     throw new Exception("Local 3D API response did not contain a 'task_id'.");
                 }
 
-                var taskId = resultProp.GetString();
-                _logger.LogInformation("[HOLOGRAM SERVICE] Task accepted by Meshy.ai. Task ID: {TaskId}. Commencing polling...", taskId);
+                var taskId = taskIdElement.GetString() ?? string.Empty;
+                _logger.LogInformation("[LOCAL HOLOGRAM SERVICE] Task accepted by local cluster. Task ID: {TaskId}. Commencing polling...", taskId);
 
-                // 2. Poll status
+                // 2. Poll status from local Docker container
                 int retries = 0;
-                int maxRetries = 60; // 60 * 2 = 120 seconds max wait for preview model
+                int maxRetries = 60; // Up to 120 seconds for complex local renders
 
                 while (retries < maxRetries)
                 {
-                    _logger.LogInformation("[HOLOGRAM SERVICE] Polling status... Attempt {Attempt}/{MaxRetries}", retries + 1, maxRetries);
+                    _logger.LogInformation("[LOCAL HOLOGRAM SERVICE] Polling local cluster... Attempt {Attempt}/{MaxRetries}", retries + 1, maxRetries);
 
-                    var statusResponse = await _httpClient.GetAsync($"{BaseUrl}/{taskId}");
+                    var statusResponse = await _httpClient.GetAsync($"{_statusEndpoint}{taskId}");
                     statusResponse.EnsureSuccessStatusCode();
 
                     var statusJson = await statusResponse.Content.ReadAsStringAsync();
                     using var statusDoc = JsonDocument.Parse(statusJson);
-                    var root = statusDoc.RootElement;
 
-                    var status = root.GetProperty("status").GetString();
+                    if (!statusDoc.RootElement.TryGetProperty("status", out var statusElement))
+                    {
+                        throw new Exception("Local 3D API status response did not contain a 'status'.");
+                    }
+
+                    var status = statusElement.GetString();
 
                     if (status == "SUCCEEDED")
                     {
-                        var modelUrls = root.GetProperty("model_urls");
-                        if (modelUrls.TryGetProperty("glb", out var glbUrlProp))
+                        if (statusDoc.RootElement.TryGetProperty("glb_url", out var glbUrlElement))
                         {
-                            var glbUrl = glbUrlProp.GetString();
-                            _logger.LogInformation("[HOLOGRAM SERVICE] Mesh synthesis complete. URL: {Url}", glbUrl);
-                            return glbUrl;
+                            var glbUrl = glbUrlElement.GetString();
+                            _logger.LogInformation("[LOCAL HOLOGRAM SERVICE] Local mesh synthesis complete. Resolving asset: {Url}", glbUrl);
+                            return glbUrl ?? string.Empty;
                         }
+                        throw new Exception("Local 3D API succeeded but returned no 'glb_url'.");
                     }
-                    else if (status == "FAILED" || status == "EXPIRED")
+                    else if (status == "FAILED")
                     {
-                        _logger.LogError("[HOLOGRAM SERVICE] Meshy generation failed. Status: {Status}", status);
+                        _logger.LogError("[LOCAL HOLOGRAM SERVICE] Local generation failed. Status: {Status}", status);
                         throw new Exception($"Generation failed with status: {status}");
                     }
 
@@ -107,12 +95,17 @@ namespace Atlas.Application
                     retries++;
                 }
 
-                _logger.LogWarning("[HOLOGRAM SERVICE] Polling timeout exceeded for Task ID: {TaskId}", taskId);
+                _logger.LogWarning("[LOCAL HOLOGRAM SERVICE] Polling timeout exceeded for Task ID: {TaskId}", taskId);
                 throw new Exception("Hologram generation timed out.");
+            }
+            catch (HttpRequestException httpEx)
+            {
+                _logger.LogError(httpEx, "[LOCAL HOLOGRAM SERVICE] Connection to the local 3D cluster failed. Is the Docker container running on port 5000?");
+                throw new Exception("Unable to reach the local 3D generation cluster, Sir.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[HOLOGRAM SERVICE] Critical failure during 3D mesh synthesis.");
+                _logger.LogError(ex, "[LOCAL HOLOGRAM SERVICE] Critical failure during local 3D mesh synthesis.");
                 throw;
             }
         }
