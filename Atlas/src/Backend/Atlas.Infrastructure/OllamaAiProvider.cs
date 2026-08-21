@@ -23,13 +23,14 @@ namespace Atlas.Infrastructure
             _httpClient = httpClient;
             _logger = logger;
             _toolDispatcher = toolDispatcher;
-            _modelName = configuration["AiSettings:ModelName"] ?? "llama3.2";
-            // Important: Use /api/chat instead of /api/generate for tool calling
-            _endpoint = (configuration["AiSettings:OllamaEndpoint"] ?? "http://localhost:11434").Replace("/api/generate", "/api/chat");
+            _modelName = configuration["AiSettings:ModelName"] ?? "llama3.1";
+            _endpoint = configuration["AiSettings:OllamaEndpoint"] ?? "http://localhost:11434/api/chat";
         }
 
         public async Task<string> GenerateResponseAsync(string prompt)
         {
+            _logger.LogInformation("[LLM PROVIDER] Submitting context to neural network model '{Model}' at {Endpoint}", _modelName, _endpoint);
+
             var messages = new List<object>
             {
                 new { role = "system", content = "You are A.T.L.A.S., an advanced AI assistant. You speak formal, concise English. If asked to show an image, use the ImageSearch tool. If asked to show a 3D hologram or model, use the GenerateHologram tool." },
@@ -98,45 +99,50 @@ namespace Atlas.Infrastructure
                 using var jsonDocument = JsonDocument.Parse(responseString);
                 var messageNode = jsonDocument.RootElement.GetProperty("message");
 
-                // Check if Ollama decided to call a tool
+                // Inspect for Tool Calls
                 if (messageNode.TryGetProperty("tool_calls", out var toolCalls) && toolCalls.GetArrayLength() > 0)
                 {
                     var toolCall = toolCalls[0].GetProperty("function");
                     var functionName = toolCall.GetProperty("name").GetString();
                     var arguments = toolCall.GetProperty("arguments").ToString();
 
-                    _logger.LogInformation("[LLM TOOL DISPATCH] LLM elected to call: {Name} with args: {Args}", functionName, arguments);
+                    _logger.LogInformation("[LLM TOOL DISPATCH] Neural network elected to call: {Name} with args: {Args}", functionName, arguments);
 
                     using var argsDoc = JsonDocument.Parse(arguments);
 
                     if (functionName == "ImageSearch")
                     {
                         var query = argsDoc.RootElement.GetProperty("query").GetString() ?? "";
-                        return $"/tool ImageSearch {query}"; // Return internal command router syntax for the Hub to catch
+                        return $"/tool ImageSearch {query}";
                     }
                     if (functionName == "GenerateHologram")
                     {
                         var objName = argsDoc.RootElement.GetProperty("objectName").GetString() ?? "object";
-                        return $"/hologram start {objName}"; // Internal routing
+                        return $"/hologram start {objName}";
                     }
                     if (functionName == "StopHologram")
                     {
-                        return $"/hologram stop"; // Internal routing
+                        return $"/hologram stop";
                     }
                 }
 
-                // Regular text response
+                // Process standard text response
                 if (messageNode.TryGetProperty("content", out var contentProp))
                 {
                     return contentProp.GetString() ?? string.Empty;
                 }
 
-                return "Error: Unexpected response format from Ollama.";
+                return "Error: Unexpected response format from Ollama, Sir.";
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "[LLM PROVIDER] Connection to Ollama failed. Target endpoint: {Endpoint}", _endpoint);
+                return "Error: Unable to connect to the local neural network provider, Sir. Is the Ollama service running on the host OS?";
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to connect or parse Ollama at {Endpoint}", _endpoint);
-                return "Error: Unable to connect to the local AI provider, Sir. Is Ollama running?";
+                _logger.LogError(ex, "[LLM PROVIDER] Critical parsing failure.");
+                return "Error: A critical failure occurred while parsing the neural network response, Sir.";
             }
         }
     }

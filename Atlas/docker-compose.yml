@@ -1,23 +1,7 @@
 version: '3.8'
 
 services:
-  # C# Backend API (Optional: usually run locally via dotnet run during dev, but prepared here)
-  # atlas_backend:
-  #   build: ./src/Backend
-  #   ports:
-  #     - "5258:5258"
-
-  ollama:
-    image: ollama/ollama:latest
-    container_name: atlas_ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ./ollama_data:/root/.ollama
-    restart: unless-stopped
-    networks:
-      - atlas_net
-
+  # Python Image Generation Service
   atlas_image_service:
     build:
       context: ./src/AI.ImageService
@@ -38,6 +22,7 @@ services:
     networks:
       - atlas_net
 
+  # Python 3D Generation Service (Shap-E)
   atlas_3d_service:
     build:
       context: ./src/AI.HologramService

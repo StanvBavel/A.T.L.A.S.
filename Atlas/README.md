@@ -11,25 +11,32 @@ A.T.L.A.S. is a fully autonomous, 100% locally-hosted AI assistant monorepo. It 
   │ - Web Speech API (STT/TTS)          ▼
   │                               [ C# .NET 8 BACKEND ]
   │                                     │
-  │                                     ├──► [ Ollama (Local LLM via Port 11434) ]
+  │                                     ├──► [ Ollama (Local Windows Host via Port 11434) ]
   │                                     │      (Function Calling & Intent Routing)
   │                                     │
-  │                                     ├──► [ Custom Image Service (FastAPI) ]
-  │                                     │      (SDXL Turbo via Port 8000)
+  │                                     ├──► [ Custom Image Service (FastAPI Docker) ]
+  │                                     │      (SDXL Turbo via mapped Port 8000)
   │                                     │
-  │                                     └──► [ Custom Hologram Service (FastAPI) ]
-  │                                            (Shap-E via Port 5000)
+  │                                     └──► [ Custom Hologram Service (FastAPI Docker) ]
+  │                                            (Shap-E via mapped Port 5000)
   ▼
 [ USER HUD ]
 ```
 
-## Infrastructure Setup
-Because A.T.L.A.S. is entirely on-premise, your system acts as the entire AI cluster. You will need:
-- **Docker Desktop** (for running the Python AI microservices)
-- **.NET 8.0 SDK** (If you want to run the C# backend outside of Docker)
-- **Node.js & NPM** (For compiling the Svelte frontend)
+## Infrastructure Setup & Networking Strategy
+Because A.T.L.A.S. is entirely on-premise, your system acts as the entire AI cluster.
 
-### 1. Build and Start the Local AI Cluster (Docker Compose)
+**IMPORTANT NETWORKING NOTE:**
+By default, this repository assumes a **Hybrid Execution Strategy**:
+1. The **C# Backend** runs natively on your Windows Host (via `dotnet run` or Visual Studio).
+2. The **Ollama LLM** runs natively on your Windows Host.
+3. The **Python Microservices** run inside Docker.
+
+Because the C# Backend runs natively, it communicates with everything via `localhost`. The Python Docker containers map their ports (`8000` and `5000`) directly to your host machine so they are accessible via `localhost`.
+
+*(If you ever decide to run the C# Backend inside Docker instead, you must change the `appsettings.json` Ollama endpoint to `http://host.docker.internal:11434` to reach your host-OS Ollama installation).*
+
+### 1. Build and Start the Local Python AI Cluster (Docker Compose)
 A `docker-compose.yml` file is provided in the root directory. It builds the custom Python microservices from source.
 
 1. Open your terminal in the repository root.
@@ -39,11 +46,12 @@ A `docker-compose.yml` file is provided in the root directory. It builds the cus
    ```
    *(Note: The first build will take considerable time as it downloads PyTorch, HuggingFace libraries, and the AI model weights. Subsequent runs will use the cache volumes mounted in the project directory).*
 
-### 2. Pulling the Language Model
-Once the Ollama container is running, execute the following command to pull a model highly capable of JSON Tool Calling (like `llama3.1`):
-```bash
-docker exec -it atlas_ollama ollama run llama3.1
-```
+### 2. Install and Pull the Language Model
+1. Install [Ollama](https://ollama.com/) natively on Windows.
+2. Execute the following command to pull a model highly capable of JSON Tool Calling (like `llama3.1`):
+   ```bash
+   ollama run llama3.1
+   ```
 
 ## Running A.T.L.A.S. Client
 
@@ -57,9 +65,9 @@ docker exec -it atlas_ollama ollama run llama3.1
    ```
 
 2. **Start Core Server:**
-   Navigate to the C# Backend directory and launch it:
+   Navigate to the C# Backend directory and launch it natively:
    ```bash
-   cd ../Backend/Atlas.Api
+   cd src/Backend/Atlas.Api
    dotnet run
    ```
 
